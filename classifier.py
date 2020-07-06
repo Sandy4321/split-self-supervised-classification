@@ -25,7 +25,7 @@ parser.add_argument('--dataroot', default='../dataset/', help='path to dataset')
 parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 # Optimization options
-parser.add_argument('--epochs', default=200, type=int, metavar='N',
+parser.add_argument('--epochs', default=300, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -61,7 +61,7 @@ args = parser.parse_args()
 state = {k: v for k, v in args._get_kwargs()}
 
 # Use CUDA
-os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
+os.environ['CUDA_VISIBLE_DEVICES'] = "5, 7, 3, 2, 1, 0"
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda:0" if use_cuda else "cpu")
 
@@ -114,10 +114,10 @@ def main():
         net.load_state_dict(torch.load(args.net))
 
     #model = Classifier(_nChannels=192 * 8 * 8, _num_classes=10, _cls_type='MultLayerFC2').to(device)
-    model = Classifier(_nChannels=192 * 8 * 8, _num_classes=10, _cls_type='MultLayerFC2').to(device)
+    model = Classifier(_nChannels=192, _num_classes=10, _cls_type='Alexnet_conv5').to(device)
     model = torch.nn.DataParallel(model, device_ids=[0])
 
-    cudnn.benchmark = False
+    cudnn.benchmark = True
     print('    Total params: %.2fM' % (sum(p.numel() for p in model.parameters()) / 1000000.0))
 
     criterion = nn.CrossEntropyLoss()
@@ -139,7 +139,7 @@ def main():
         logger = Logger(os.path.join(args.checkpoint, 'log.txt'), title=title, resume=True)
     else:
         logger = Logger(os.path.join(args.checkpoint, 'log.txt'), title=title)
-        logger.set_names(['Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
+        logger.set_names(['Epoch', 'LR',  'Train Acc.', 'Valid Acc.'])
 
     if args.evaluate:
         print('\nEvaluation only')
@@ -157,7 +157,9 @@ def main():
         test_loss, test_acc = test(testloader, net, model, criterion, epoch, use_cuda, device)
 
         # append logger file
-        logger.append([state['lr'], train_loss, test_loss, train_acc, test_acc])
+        #logger.append([state['lr'], train_loss, test_loss, train_acc, test_acc])
+
+        logger.append(epoch, [state['lr'], train_acc, test_acc])
 
         # save model
         is_best = test_acc > best_acc
@@ -219,10 +221,10 @@ def train(trainloader, net, model, criterion, optimizer, epoch, use_cuda, device
         end = time.time()
 
         # plot progress
-        bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+        bar.suffix = '({batch}/{size}) Data: {data} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
             batch=batch_idx + 1,
             size=len(trainloader),
-            data=data_time.avg,
+            data=epoch,
             bt=batch_time.avg,
             total=bar.elapsed_td,
             eta=bar.eta_td,
@@ -273,10 +275,10 @@ def test(testloader, net, model, criterion, epoch, use_cuda, device):
         end = time.time()
 
         # plot progress
-        bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+        bar.suffix = '({batch}/{size}) Epoch: {epoch} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
             batch=batch_idx + 1,
             size=len(testloader),
-            data=data_time.avg,
+            epoch= epoch,
             bt=batch_time.avg,
             total=bar.elapsed_td,
             eta=bar.eta_td,

@@ -11,16 +11,20 @@ import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.utils as vutils
 
+import numpy as np
+
+import time
 from NetworkInNetwork import Regressor
 from dataset import CIFAR10
 import PIL
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataroot', default='/home/lhzhang/cifar10', help='path to dataset')
+parser.add_argument('--prefix', default='S4', type=str, help='Mark different models')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=2)
 parser.add_argument('--batchSize', type=int, default=512, help='input batch size')
 parser.add_argument('--imageSize', type=int, default=32, help='the height / width of the input image to network')
-parser.add_argument('--niter', type=int, default=1500, help='number of epochs to train for')
+parser.add_argument('--niter', type=int, default=2000, help='number of epochs to train for')
 parser.add_argument('--lr', type=float, default=0.1, help='learning rate, default=0.1')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
@@ -49,7 +53,7 @@ print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
-cudnn.benchmark = False
+cudnn.benchmark = True
 
 if torch.cuda.is_available() and not opt.cuda:
     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
@@ -70,10 +74,14 @@ assert train_dataset
 train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=opt.batchSize,
                                                shuffle=True, num_workers=int(opt.workers))
 
-device = torch.device("cuda:2" if opt.cuda else "cpu")
+# Use CUDA
+os.environ['CUDA_VISIBLE_DEVICES'] = "5, 7, 3, 2, 1, 0"
+use_cuda = torch.cuda.is_available()
+device = torch.device("cuda:0" if use_cuda else "cpu")
 ngpu = int(opt.ngpu)
 
-net = Regressor(_num_stages=3, _use_avg_on_conv3=False).to(device)
+net = Regressor(_num_stages=4, _use_avg_on_conv3=False).to(device)
+
 if opt.cuda:
     net = torch.nn.DataParallel(net, device_ids=range(ngpu))
 
@@ -89,6 +97,8 @@ optimizer = optim.SGD(net.parameters(), lr=opt.lr, momentum=0.9, weight_decay=5e
 if opt.optimizer != '':
     optimizer.load_state_dict(torch.load(opt.optimizer))
 
+best_err = 10000
+best_epoch = 0
 for epoch in range(opt.niter):
     # adjust learning rate
     if epoch >= 240 and epoch < 480:
@@ -107,6 +117,8 @@ for epoch in range(opt.niter):
         for param_group in optimizer.param_groups:
             param_group['lr'] = opt.lr * 0.0016 - 3e-7 * (epoch - 999)
 
+    err_epoch = []
+    start_time = time.time()
     for i, data in enumerate(train_dataloader, 0):
         net.zero_grad()
         img1 = data[0].to(device)  # original images
@@ -116,16 +128,33 @@ for epoch in range(opt.niter):
         f1, f2, output = net(img1, img2)
 
         err = criterion(output.to(device), matrix)
+        err_epoch.append(err.item())
 
         err.backward()
         optimizer.step()
 
-        print('[%d/%d][%d/%d] Loss: %.4f'
-              % (epoch, opt.niter, i, len(train_dataloader),
-                 err.item()))
+        #print('[%d/%d][%d/%d] Loss: %.4f'
+        #      % (epoch, opt.niter, i, len(train_dataloader),
+        #         err.item()))
+
+    err_avg = np.mean(err_epoch)
+    end_time = time.time()
+    epoch_time = (end_time-start_time)/60
+
+    remain_time = (opt.niter - epoch) * epoch_time
+
+    print('[%d/%d] Remain time: %.2fmin | Every Epoch %.2fmin | Epoch Err %.4f | best epoch %d'
+          % (epoch, opt.niter, remain_time, epoch_time, err_avg, best_epoch))
+
+    if err_avg < best_err:
+        best_err = err_avg
+        best_epoch = epoch
+        torch.save(net.state_dict(), '%s/%s_net_best.pth' % (opt.outf, opt.prefix))
+        torch.save(optimizer.state_dict(), '%s/%s_optimizer_best.pth' % (opt.outf, opt.prefix))
+        np.savetxt('%s/best_epoch.txt'%(opt.outf), [int(best_epoch)])
 
     # do checkpointing
-    if epoch % 100 == 50:
+    if epoch % 100 == 99:
         torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (opt.outf, epoch))
         torch.save(optimizer.state_dict(), '%s/optimizer_epoch_%d.pth' % (opt.outf, epoch))
 

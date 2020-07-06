@@ -158,3 +158,4 @@ class Regressor(nn.Module):
             return x1, x2, torch.tanh(self.fc(x))
         else:
             return x1, x2
+
